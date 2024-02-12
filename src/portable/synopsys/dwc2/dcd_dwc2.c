@@ -521,8 +521,9 @@ void dcd_init (uint8_t rhport)
   // Force device mode
   dwc2->gusbcfg = (dwc2->gusbcfg & ~GUSBCFG_FHMOD) | GUSBCFG_FDMOD;
 
-  // Clear A override, force B Valid
-  dwc2->gotgctl = (dwc2->gotgctl & ~GOTGCTL_AVALOEN) | GOTGCTL_BVALOEN | GOTGCTL_BVALOVAL;
+  // No overrides
+  dwc2->gotgctl &= ~(GOTGCTL_BVALOEN | GOTGCTL_BVALOVAL | GOTGCTL_VBVALOVAL);
+
 
   // If USB host misbehaves during status portion of control xfer
   // (non zero-length packet), send STALL back and discard.
