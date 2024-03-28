@@ -632,8 +632,8 @@ void dcd_sof_enable(uint8_t rhport, bool en)
 
 #if TU_CHECK_MCU(OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4)
 
-// Check if IN/OUT endpoint is avaliable before opening it
-static bool dcd_edpt_available(uint8_t rhport, uint8_t dir) 
+// Check if IN/OUT endpoint is available before opening it
+static bool dcd_edpt_available(uint8_t rhport, uint8_t dir)
 {
     // Verify that we have a vacant EP
     if ((dwc_ep_config[rhport].in_ep + dwc_ep_config[rhport].out_ep) > (dwc_ep_config[rhport].ep_max_count - 1)) {
@@ -645,7 +645,7 @@ static bool dcd_edpt_available(uint8_t rhport, uint8_t dir)
 
     // Verify overflow for IN EP ESP32Sx
  #if TU_CHECK_MCU(OPT_MCU_ESP32S2, OPT_MCU_ESP32S3)
-     // ESP32Sx has 6 endpoints, from which only 5 can be confiugred as IN
+     // ESP32Sx has 6 endpoints, from which only 5 can be configured as IN
      if ((dir) && (new_ep_count > (dwc_ep_config[rhport].ep_max_count - 1))) {
          return false;
      }
@@ -656,11 +656,11 @@ static bool dcd_edpt_available(uint8_t rhport, uint8_t dir)
     } else {
         dwc_ep_config[rhport].out_ep = new_ep_count;
     }
-    return true; 
+    return true;
 }
 
 // Release an endpoint.
-static void dcd_edpt_release(uint8_t rhport, uint8_t dir)
+static bool dcd_edpt_release(uint8_t rhport, uint8_t dir)
 {
   if (dir) {
     TU_ASSERT(dwc_ep_config[rhport].in_ep == 0);    // Check if number of opened EPs is not zero
@@ -669,6 +669,7 @@ static void dcd_edpt_release(uint8_t rhport, uint8_t dir)
     TU_ASSERT(dwc_ep_config[rhport].out_ep == 0);
     dwc_ep_config[rhport].out_ep--;
   }
+  return true;
 }
 #endif
 
