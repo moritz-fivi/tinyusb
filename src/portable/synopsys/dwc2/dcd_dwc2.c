@@ -632,6 +632,13 @@ void dcd_sof_enable(uint8_t rhport, bool en)
 
 #if TU_CHECK_MCU(OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4)
 
+// Reset opened IN/OUT endpoint counters
+static void dcd_edpt_reset(uint8_t rhport)
+{
+  dwc_ep_config[rhport].in_ep = 0;
+  dwc_ep_config[rhport].out_ep = 0;
+}
+
 // Check if IN/OUT endpoint is available before opening it
 static bool dcd_edpt_available(uint8_t rhport, uint8_t dir)
 {
@@ -671,7 +678,7 @@ static bool dcd_edpt_release(uint8_t rhport, uint8_t dir)
   }
   return true;
 }
-#endif
+#endif // OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4
 
 bool dcd_edpt_open (uint8_t rhport, tusb_desc_endpoint_t const * desc_edpt)
 {
@@ -688,7 +695,7 @@ bool dcd_edpt_open (uint8_t rhport, tusb_desc_endpoint_t const * desc_edpt)
     TU_LOG(1, "No endpoints available (ep_max=%d) \r\n", dwc_ep_config[rhport].ep_max_count);
     return false;
   }
-  #endif
+  #endif // OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4
 
   xfer_ctl_t * xfer = XFER_CTL_BASE(epnum, dir);
   xfer->max_size = tu_edpt_packet_size(desc_edpt);
@@ -770,8 +777,7 @@ void dcd_edpt_close_all (uint8_t rhport)
   uint8_t const ep_count = _dwc2_controller[rhport].ep_count;
 
   #if TU_CHECK_MCU(OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4)
-  dwc_ep_config[rhport].in_ep = 0;
-  dwc_ep_config[rhport].out_ep = 0;
+  dcd_edpt_reset(rhport);
   #endif
 
   // Disable non-control interrupt
@@ -1290,6 +1296,9 @@ void dcd_int_handler(uint8_t rhport)
     // USBRST is start of reset.
     dwc2->gintsts = GINTSTS_USBRST;
     bus_reset(rhport);
+  #if TU_CHECK_MCU(OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4)
+    dcd_edpt_reset(rhport);
+  #endif // OPT_MCU_ESP32S2, OPT_MCU_ESP32S3, OPT_MCU_ESP32P4
   }
 
   if(int_status & GINTSTS_ENUMDNE)
