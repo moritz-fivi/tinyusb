@@ -46,6 +46,12 @@
 #define BULK_PACKET_SIZE (TUD_OPT_HIGH_SPEED ? 512 : 64)
 
 typedef struct {
+  // Endpoint Transfer buffer
+  // Hint: When DMA capability is enabled and cache is used and the buffers
+  // should be in specific section CFG_TUD_MEM_SECTION we declare them first
+  CFG_TUSB_MEM_ALIGN uint8_t epout_buf[CFG_TUD_CDC_EP_BUFSIZE];
+  CFG_TUSB_MEM_ALIGN uint8_t epin_buf[CFG_TUD_CDC_EP_BUFSIZE];
+
   uint8_t itf_num;
   uint8_t ep_notif;
   uint8_t ep_in;
@@ -68,9 +74,6 @@ typedef struct {
   OSAL_MUTEX_DEF(rx_ff_mutex);
   OSAL_MUTEX_DEF(tx_ff_mutex);
 
-  // Endpoint Transfer buffer
-  CFG_TUSB_MEM_ALIGN uint8_t epout_buf[CFG_TUD_CDC_EP_BUFSIZE];
-  CFG_TUSB_MEM_ALIGN uint8_t epin_buf[CFG_TUD_CDC_EP_BUFSIZE];
 } cdcd_interface_t;
 
 #define ITF_MEM_RESET_SIZE   offsetof(cdcd_interface_t, wanted_char)
@@ -78,7 +81,8 @@ typedef struct {
 //--------------------------------------------------------------------+
 // INTERNAL OBJECT & FUNCTION DECLARATION
 //--------------------------------------------------------------------+
-CFG_TUD_MEM_SECTION static cdcd_interface_t _cdcd_itf[CFG_TUD_CDC];
+CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static cdcd_interface_t _cdcd_itf[CFG_TUD_CDC];
+
 static tud_cdc_configure_fifo_t _cdcd_fifo_cfg;
 
 static bool _prep_out_transaction (cdcd_interface_t* p_cdc) {
