@@ -55,10 +55,6 @@ enum
 
 typedef struct
 {
-  // TODO optimize alignment
-  CFG_TUSB_MEM_ALIGN msc_cbw_t cbw;
-  CFG_TUSB_MEM_ALIGN msc_csw_t csw;
-
   uint8_t  itf_num;
   uint8_t  ep_in;
   uint8_t  ep_out;
@@ -75,6 +71,8 @@ typedef struct
 }mscd_interface_t;
 
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static mscd_interface_t _mscd_itf;
+CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static msc_cbw_t _mscd_cbw;
+CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static msc_csw_t _mscd_csw;
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static uint8_t _mscd_buf[CFG_TUD_MSC_EP_BUFSIZE];
 
 //--------------------------------------------------------------------+
@@ -94,25 +92,25 @@ TU_ATTR_ALWAYS_INLINE static inline bool is_data_in(uint8_t dir)
 static inline bool send_csw(uint8_t rhport, mscd_interface_t* p_msc)
 {
   // Data residue is always = host expect - actual transferred
-  p_msc->csw.data_residue = p_msc->cbw.total_bytes - p_msc->xferred_len;
+  _mscd_csw.data_residue = _mscd_cbw.total_bytes - p_msc->xferred_len;
 
   p_msc->stage = MSC_STAGE_STATUS_SENT;
-  return usbd_edpt_xfer(rhport, p_msc->ep_in , (uint8_t*) &p_msc->csw, sizeof(msc_csw_t));
+  return usbd_edpt_xfer(rhport, p_msc->ep_in , (uint8_t*) &_mscd_csw, sizeof(msc_csw_t));
 }
 
 static inline bool prepare_cbw(uint8_t rhport, mscd_interface_t* p_msc)
 {
   p_msc->stage = MSC_STAGE_CMD;
-  return usbd_edpt_xfer(rhport, p_msc->ep_out, (uint8_t*) &p_msc->cbw, sizeof(msc_cbw_t));
+  return usbd_edpt_xfer(rhport, p_msc->ep_out, (uint8_t*) &_mscd_cbw, sizeof(msc_cbw_t));
 }
 
 static void fail_scsi_op(uint8_t rhport, mscd_interface_t* p_msc, uint8_t status)
 {
-  msc_cbw_t const * p_cbw = &p_msc->cbw;
-  msc_csw_t       * p_csw = &p_msc->csw;
+  msc_cbw_t const * p_cbw = &_mscd_cbw;
+  msc_csw_t       * p_csw = &_mscd_csw;
 
   p_csw->status       = status;
-  p_csw->data_residue = p_msc->cbw.total_bytes - p_msc->xferred_len;
+  p_csw->data_residue = p_cbw->total_bytes - p_msc->xferred_len;
   p_msc->stage        = MSC_STAGE_STATUS;
 
   // failed but sense key is not set: default to Illegal Request
@@ -395,8 +393,8 @@ bool mscd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t event, uint32_t
   (void) event;
 
   mscd_interface_t* p_msc = &_mscd_itf;
-  msc_cbw_t const * p_cbw = &p_msc->cbw;
-  msc_csw_t       * p_csw = &p_msc->csw;
+  msc_cbw_t const * p_cbw = &_mscd_cbw;
+  msc_csw_t       * p_csw = &_mscd_csw;
 
   switch (p_msc->stage)
   {
@@ -852,7 +850,7 @@ static int32_t proc_builtin_scsi(uint8_t lun, uint8_t const scsi_cmd[16], uint8_
 
 static void proc_read10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 {
-  msc_cbw_t const * p_cbw = &p_msc->cbw;
+  msc_cbw_t const * p_cbw = &_mscd_cbw;
 
   // block size already verified not zero
   uint16_t const block_sz = rdwr10_get_blocksize(p_cbw);
@@ -890,7 +888,7 @@ static void proc_read10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 
 static void proc_write10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 {
-  msc_cbw_t const * p_cbw = &p_msc->cbw;
+  msc_cbw_t const * p_cbw = &_mscd_cbw;
   bool writable = true;
 
   if ( tud_msc_is_writable_cb )
@@ -917,7 +915,7 @@ static void proc_write10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 // process new data arrived from WRITE10
 static void proc_write10_new_data(uint8_t rhport, mscd_interface_t* p_msc, uint32_t xferred_bytes)
 {
-  msc_cbw_t const * p_cbw = &p_msc->cbw;
+  msc_cbw_t const * p_cbw = &_mscd_cbw;
 
   // block size already verified not zero
   uint16_t const block_sz = rdwr10_get_blocksize(p_cbw);
