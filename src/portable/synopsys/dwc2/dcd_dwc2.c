@@ -49,6 +49,14 @@
 
 static CFG_TUD_MEM_SECTION TU_ATTR_ALIGNED(4) uint32_t _setup_packet[2];
 
+// TODO: make dependency from SOC_NON_CACHEABLE_OFFSET and change 1 to it
+#if (0)
+#define _setup_pkt_p      ((uint8_t *)(((uintptr_t)_setup_packet)  + 0x40000000))
+#else
+#define _setup_pkt_p      ((uint8_t *)_setup_packet)
+#endif
+
+
 typedef struct {
   uint8_t* buffer;
   tu_fifo_t* ff;
@@ -91,6 +99,8 @@ static void dma_setup_prepare(uint8_t rhport) {
 
   // Receive only 1 packet
   dwc2->epout[0].doeptsiz = (1 << DOEPTSIZ_STUPCNT_Pos) | (1 << DOEPTSIZ_PKTCNT_Pos) | (8 << DOEPTSIZ_XFRSIZ_Pos);
+  // HINT:
+  // DMA use a cache-able addr only, so use _setup_packet here
   dwc2->epout[0].doepdma = (uintptr_t)_setup_packet;
   dwc2->epout[0].doepctl |= DOEPCTL_EPENA | DOEPCTL_USBAEP;
 }
@@ -348,6 +358,8 @@ static void edpt_schedule_packets(uint8_t rhport, const uint8_t epnum, const uin
 
   const bool is_dma = dma_device_enabled(dwc2);
   if(is_dma) {
+    // HINT:
+    // DMA use a cache-able addr only, so use xfer->buffer here
     dep->diepdma = (uintptr_t) xfer->buffer;
   }
 
@@ -848,7 +860,7 @@ static void handle_epout_dma(uint8_t rhport, uint8_t epnum, dwc2_doepint_t doepi
 
   if (doepint_bm.setup_phase_done) {
     dma_setup_prepare(rhport);
-    dcd_event_setup_received(rhport, (uint8_t*) _setup_packet, true);
+    dcd_event_setup_received(rhport, _setup_pkt_p, true);
     return;
   }
 
