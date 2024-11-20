@@ -66,6 +66,13 @@ tu_static usbd_control_xfer_t _ctrl_xfer;
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN
 tu_static uint8_t _usbd_ctrl_buf[CFG_TUD_ENDPOINT0_SIZE];
 
+// TODO: make dependency from SOC_NON_CACHEABLE_OFFSET and change 1 to it
+#if (0)
+#define _usbd_ctrl_p_buf      ((uint8_t*)  (((uintptr_t)_usbd_ctrl_buf)  + 0x40000000))
+#else
+#define _usbd_ctrl_p_buf      (_usbd_ctrl_buf)
+#endif // SOC_NON_CACHEABLE_OFFSET
+
 //--------------------------------------------------------------------+
 // Application API
 //--------------------------------------------------------------------+
@@ -99,10 +106,12 @@ static bool _data_stage_xact(uint8_t rhport) {
   if (_ctrl_xfer.request.bmRequestType_bit.direction == TUSB_DIR_IN) {
     ep_addr = EDPT_CTRL_IN;
     if (xact_len) {
-      TU_VERIFY(0 == tu_memcpy_s(_usbd_ctrl_buf, CFG_TUD_ENDPOINT0_SIZE, _ctrl_xfer.buffer, xact_len));
+      TU_VERIFY(0 == tu_memcpy_s(_usbd_ctrl_p_buf, CFG_TUD_ENDPOINT0_SIZE, _ctrl_xfer.buffer, xact_len));
     }
   }
-
+  // HINT:
+  // DMA doesn't have access to noncache-able memory and will use the cache-able addr
+  // for preparing transfer, but during transfer will use the direct memory address
   return usbd_edpt_xfer(rhport, ep_addr, xact_len ? _usbd_ctrl_buf : NULL, xact_len);
 }
 
@@ -179,8 +188,8 @@ bool usbd_control_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result,
 
   if (_ctrl_xfer.request.bmRequestType_bit.direction == TUSB_DIR_OUT) {
     TU_VERIFY(_ctrl_xfer.buffer);
-    memcpy(_ctrl_xfer.buffer, _usbd_ctrl_buf, xferred_bytes);
-    TU_LOG_MEM(CFG_TUD_LOG_LEVEL, _usbd_ctrl_buf, xferred_bytes, 2);
+    memcpy(_ctrl_xfer.buffer, _usbd_ctrl_p_buf, xferred_bytes);
+    TU_LOG_MEM(CFG_TUD_LOG_LEVEL, _usbd_ctrl_p_buf, xferred_bytes, 2);
   }
 
   _ctrl_xfer.total_xferred += (uint16_t) xferred_bytes;
