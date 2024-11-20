@@ -71,9 +71,24 @@ typedef struct
 }mscd_interface_t;
 
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static mscd_interface_t _mscd_itf;
+
+// HINT: bypass cache
+// All three buffers below should use direct access while read and write
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static msc_cbw_t _mscd_cbw;
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static msc_csw_t _mscd_csw;
 CFG_TUD_MEM_SECTION CFG_TUSB_MEM_ALIGN tu_static uint8_t _mscd_buf[CFG_TUD_MSC_EP_BUFSIZE];
+
+// TODO: make dependency from SOC_NON_CACHEABLE_OFFSET and change 1 to it
+#if (0)
+#define _mscd_p_cbw      ((msc_cbw_t*)(((uintptr_t)&_mscd_cbw) + 0x40000000))
+#define _mscd_p_csw      ((msc_csw_t*)(((uintptr_t)&_mscd_csw) + 0x40000000))
+#define _mscd_p_buf      ((uint8_t*)  (((uintptr_t)_mscd_buf)  + 0x40000000))
+#else
+#define _mscd_p_cbw      (&_mscd_cbw)
+#define _mscd_p_csw      (&_mscd_csw)
+#define _mscd_p_buf      (_mscd_buf)
+#endif // SOC_NON_CACHEABLE_OFFSET
+
 
 //--------------------------------------------------------------------+
 // INTERNAL OBJECT & FUNCTION DECLARATION
@@ -91,8 +106,10 @@ TU_ATTR_ALWAYS_INLINE static inline bool is_data_in(uint8_t dir)
 
 static inline bool send_csw(uint8_t rhport, mscd_interface_t* p_msc)
 {
+  msc_cbw_t const * p_cbw = _mscd_p_cbw;
+  msc_csw_t       * p_csw = _mscd_p_csw;
   // Data residue is always = host expect - actual transferred
-  _mscd_csw.data_residue = _mscd_cbw.total_bytes - p_msc->xferred_len;
+  p_csw->data_residue = p_cbw->total_bytes - p_msc->xferred_len;
 
   p_msc->stage = MSC_STAGE_STATUS_SENT;
   return usbd_edpt_xfer(rhport, p_msc->ep_in , (uint8_t*) &_mscd_csw, sizeof(msc_csw_t));
@@ -106,8 +123,8 @@ static inline bool prepare_cbw(uint8_t rhport, mscd_interface_t* p_msc)
 
 static void fail_scsi_op(uint8_t rhport, mscd_interface_t* p_msc, uint8_t status)
 {
-  msc_cbw_t const * p_cbw = &_mscd_cbw;
-  msc_csw_t       * p_csw = &_mscd_csw;
+  msc_cbw_t const * p_cbw = _mscd_p_cbw;
+  msc_csw_t       * p_csw = _mscd_p_csw;
 
   p_csw->status       = status;
   p_csw->data_residue = p_cbw->total_bytes - p_msc->xferred_len;
@@ -393,8 +410,10 @@ bool mscd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t event, uint32_t
   (void) event;
 
   mscd_interface_t* p_msc = &_mscd_itf;
-  msc_cbw_t const * p_cbw = &_mscd_cbw;
-  msc_csw_t       * p_csw = &_mscd_csw;
+  // HINT: get cache-able or noncache-able addresses
+  msc_cbw_t const * p_cbw = _mscd_p_cbw;
+  msc_csw_t       * p_csw = _mscd_p_csw;
+  uint8_t         * p_buf = _mscd_p_buf;
 
   switch (p_msc->stage)
   {
@@ -473,12 +492,12 @@ bool mscd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t event, uint32_t
         }else
         {
           // First process if it is a built-in commands
-          int32_t resplen = proc_builtin_scsi(p_cbw->lun, p_cbw->command, _mscd_buf, sizeof(_mscd_buf));
+          int32_t resplen = proc_builtin_scsi(p_cbw->lun, p_cbw->command, p_buf, sizeof(_mscd_buf));
 
           // Invoke user callback if not built-in
           if ( (resplen < 0) && (p_msc->sense_key == 0) )
           {
-            resplen = tud_msc_scsi_cb(p_cbw->lun, p_cbw->command, _mscd_buf, (uint16_t) p_msc->total_len);
+            resplen = tud_msc_scsi_cb(p_cbw->lun, p_cbw->command, p_buf, (uint16_t) p_msc->total_len);
           }
 
           if ( resplen < 0 )
@@ -511,6 +530,8 @@ bool mscd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t event, uint32_t
             {
               // cannot return more than host expect
               p_msc->total_len = tu_min32((uint32_t) resplen, p_cbw->total_bytes);
+              // HINT:
+              // DMA use a cache-able addr only, so use _mscd_buf here
               TU_ASSERT( usbd_edpt_xfer(rhport, p_msc->ep_in, _mscd_buf, (uint16_t) p_msc->total_len) );
             }
           }
@@ -546,7 +567,7 @@ bool mscd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t event, uint32_t
         // OUT transfer, invoke callback if needed
         if ( !is_data_in(p_cbw->dir) )
         {
-          int32_t cb_result = tud_msc_scsi_cb(p_cbw->lun, p_cbw->command, _mscd_buf, (uint16_t) p_msc->total_len);
+          int32_t cb_result = tud_msc_scsi_cb(p_cbw->lun, p_cbw->command, p_buf, (uint16_t) p_msc->total_len);
 
           if ( cb_result < 0 )
           {
@@ -850,7 +871,8 @@ static int32_t proc_builtin_scsi(uint8_t lun, uint8_t const scsi_cmd[16], uint8_
 
 static void proc_read10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 {
-  msc_cbw_t const * p_cbw = &_mscd_cbw;
+  msc_cbw_t const * p_cbw = _mscd_p_cbw;
+  uint8_t         * p_buf = _mscd_p_buf;
 
   // block size already verified not zero
   uint16_t const block_sz = rdwr10_get_blocksize(p_cbw);
@@ -863,7 +885,7 @@ static void proc_read10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 
   // Application can consume smaller bytes
   uint32_t const offset = p_msc->xferred_len % block_sz;
-  nbytes = tud_msc_read10_cb(p_cbw->lun, lba, offset, _mscd_buf, (uint32_t) nbytes);
+  nbytes = tud_msc_read10_cb(p_cbw->lun, lba, offset, p_buf, (uint32_t) nbytes);
 
   if ( nbytes < 0 )
   {
@@ -888,7 +910,7 @@ static void proc_read10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 
 static void proc_write10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 {
-  msc_cbw_t const * p_cbw = &_mscd_cbw;
+  msc_cbw_t const * p_cbw = _mscd_p_cbw;
   bool writable = true;
 
   if ( tud_msc_is_writable_cb )
@@ -915,7 +937,8 @@ static void proc_write10_cmd(uint8_t rhport, mscd_interface_t* p_msc)
 // process new data arrived from WRITE10
 static void proc_write10_new_data(uint8_t rhport, mscd_interface_t* p_msc, uint32_t xferred_bytes)
 {
-  msc_cbw_t const * p_cbw = &_mscd_cbw;
+  msc_cbw_t const * p_cbw = _mscd_p_cbw;
+  uint8_t         * p_buf = _mscd_p_buf;
 
   // block size already verified not zero
   uint16_t const block_sz = rdwr10_get_blocksize(p_cbw);
@@ -925,7 +948,7 @@ static void proc_write10_new_data(uint8_t rhport, mscd_interface_t* p_msc, uint3
 
   // Invoke callback to consume new data
   uint32_t const offset = p_msc->xferred_len % block_sz;
-  int32_t nbytes = tud_msc_write10_cb(p_cbw->lun, lba, offset, _mscd_buf, xferred_bytes);
+  int32_t nbytes = tud_msc_write10_cb(p_cbw->lun, lba, offset, p_buf, xferred_bytes);
 
   if ( nbytes < 0 )
   {
@@ -948,7 +971,7 @@ static void proc_write10_new_data(uint8_t rhport, mscd_interface_t* p_msc, uint3
       if ( nbytes > 0 )
       {
         p_msc->xferred_len += (uint16_t) nbytes;
-        memmove(_mscd_buf, _mscd_buf+nbytes, left_over);
+        memmove(p_buf, p_buf+nbytes, left_over);
       }
 
       // simulate an transfer complete with adjusted parameters --> callback will be invoked with adjusted parameter
